@@ -5,6 +5,7 @@ const path = require('path');
 const app = express();
 const { exec, spawn } = require('child_process');
 const cors = require('cors');
+require('dotenv').config();
 
 // Use dynamic port for Render
 const port = process.env.PORT || 5000;
