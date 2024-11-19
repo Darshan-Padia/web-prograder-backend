@@ -1,0 +1,20 @@
+{
+    "id": 3,
+    "title": "Valid Parentheses",
+    "difficulty": "Easy",
+    "description": "Given a string s containing just the characters '(', ')', '{', '}', '[' and ']', determine if the input string is valid.",
+    "starterCode": "#include <stack>\n#include <string>\n#include <iostream>\n\nclass Solution {\npublic:\n    bool isValid(std::string s) {\n        // Your code here\n    }\n};\n",
+    "examples": [
+      {
+        "input": "s = \"()\"",
+        "output": "true",
+        "explanation": "The string \"()\" is valid."
+      },
+      {
+        "input": "s = \"(]\"",
+        "output": "false",
+        "explanation": "The string \"(]\" is not valid."
+      }
+    ]
+  }
+  

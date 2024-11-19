@@ -1,0 +1,20 @@
+{
+    "id": 2,
+    "title": "Palindrome Number",
+    "difficulty": "Easy",
+    "description": "Given an integer x, return true if x is a palindrome, and false otherwise.",
+    "starterCode": "#include <iostream>\n\nclass Solution {\npublic:\n    bool isPalindrome(int x) {\n        // Your code here\n    }\n};\n",
+    "examples": [
+      {
+        "input": "x = 121",
+        "output": "true",
+        "explanation": "121 reads as 121 from left to right and from right to left."
+      },
+      {
+        "input": "x = -121",
+        "output": "false",
+        "explanation": "-121 reads as 121- from left to right and from right to left."
+      }
+    ]
+  }
+  
