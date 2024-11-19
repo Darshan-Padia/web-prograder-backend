@@ -69,7 +69,6 @@ app.post('/validate-code', async (req, res) => {
 
     let allPassed = true;
     let results = [];
-    let responseSent = false; // To ensure response is only sent once
 
     try {
         for (const inputFile of inputFiles) {
@@ -77,7 +76,7 @@ app.post('/validate-code', async (req, res) => {
             const inputContent = fs.readFileSync(path.join(testCasesPath, inputFile), 'utf-8');
             const expectedOutput = fs.readFileSync(path.join(testCasesPath, `${baseName}.out`), 'utf-8').trim();
 
-            const runResponse = await runCppWithTimeout(code, inputContent);
+            const runResponse = await runCppWithPreciseTimeout(code, inputContent);
 
             if (runResponse.error) {
                 results.push({
@@ -87,6 +86,7 @@ app.post('/validate-code', async (req, res) => {
                     details: runResponse.details,
                 });
                 allPassed = false;
+                break;
             } else {
                 const userOutput = runResponse.output.trim();
                 const passed = userOutput === expectedOutput;
@@ -94,50 +94,147 @@ app.post('/validate-code', async (req, res) => {
                 results.push({
                     testCase: baseName,
                     passed,
-                    expectedOutput,
-                    userOutput,
+                    expectedOutput: passed ? null : expectedOutput,
+                    userOutput: passed ? null : userOutput,
                 });
 
                 if (!passed) allPassed = false;
             }
         }
 
-        // Send the final response only once after all tests have been processed
-        if (!responseSent) {
-            res.status(200).json({ allPassed, results });
-            responseSent = true;
-        }
+        res.status(200).json({ allPassed, results });
     } catch (err) {
-        // Handle unexpected errors and ensure the response is sent once
-        if (!responseSent) {
-            res.status(500).json({ error: 'Unexpected error occurred', details: err.message });
-            responseSent = true;
-        }
+        res.status(500).json({ error: 'Unexpected error occurred', details: err.message });
     }
 });
 
 
+
 // Function to handle the timeout
-const runCppWithTimeout = (code, input) => {
-    return new Promise((resolve, reject) => {
-        const timeout = 1000; // 1 second
-        let timedOut = false;
+const runCppWithPreciseTimeout = (code, input) => {
+    return new Promise((resolve) => {
+        const filePath = path.join(__dirname, `temp_${Date.now()}.cpp`);
+        const outputPath = path.join(__dirname, `output_${Date.now()}`);
+        
+        const cleanup = () => {
+            if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+            if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+        };
 
-        const timeoutTimer = setTimeout(() => {
-            timedOut = true;
-            resolve({ error: 'TLE: Time Limit Exceeded' });
-        }, timeout);
+        // Add timing code to the user's program
+        const instrumentedCode = `
+#include <chrono>
+#include <iostream>
+#include <csignal>
 
-        runCpp(code, input).then((response) => {
-            if (!timedOut) {
-                clearTimeout(timeoutTimer);
-                resolve(response);
+auto start_time = std::chrono::high_resolution_clock::now();
+
+void check_timeout(int) {
+    auto current_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+        current_time - start_time
+    ).count();
+    if (duration > ${EXECUTION_TIME_LIMIT}) {
+        std::exit(124); // Special exit code for TLE
+    }
+}
+
+${code}
+
+int main() {
+    signal(SIGALRM, check_timeout);
+    ualarm(100000, 100000); // Check every 0.1 seconds
+    auto real_start = std::chrono::high_resolution_clock::now();
+    
+    try {
+        main_user();
+    } catch (...) {
+        std::cerr << "Runtime Error: Unknown exception caught" << std::endl;
+        return 1;
+    }
+    
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+        end_time - real_start
+    ).count();
+    
+    if (duration > ${EXECUTION_TIME_LIMIT}) {
+        std::exit(124);
+    }
+    return 0;
+}`;
+
+        // Modify user's code to wrap their main function
+        const modifiedCode = code.replace(
+            /int\s+main\s*\([^)]*\)\s*{/g, 
+            'int main_user() {'
+        );
+
+        fs.writeFile(filePath, instrumentedCode.replace('${code}', modifiedCode), async (err) => {
+            if (err) {
+                cleanup();
+                return resolve({ error: 'Failed to write code to file' });
             }
-        }).catch((error) => {
-            if (!timedOut) {
-                clearTimeout(timeoutTimer);
-                reject(error);
-            }
+
+            // Compile with optimizations and timing code
+            exec(`g++ -O2 ${filePath} -o ${outputPath}`, (compileErr, stdout, stderr) => {
+                if (compileErr) {
+                    cleanup();
+                    return resolve({ error: 'Compilation failed', details: stderr });
+                }
+
+                let processCompleted = false;
+                const runProcess = spawn(outputPath);
+                let output = '';
+                let errorOutput = '';
+
+                // Set a process timeout slightly longer than execution timeout
+                const timeoutId = setTimeout(() => {
+                    if (!processCompleted) {
+                        runProcess.kill();
+                        cleanup();
+                        resolve({ error: 'TLE: Time Limit Exceeded' });
+                    }
+                }, EXECUTION_TIME_LIMIT + 500); // Add small buffer for process overhead
+
+                runProcess.stdout.on('data', (data) => {
+                    output += data.toString();
+                });
+
+                runProcess.stderr.on('data', (data) => {
+                    errorOutput += data.toString();
+                });
+
+                if (input) {
+                    runProcess.stdin.write(input);
+                    runProcess.stdin.end();
+                }
+
+                runProcess.on('error', (error) => {
+                    if (!processCompleted) {
+                        processCompleted = true;
+                        clearTimeout(timeoutId);
+                        cleanup();
+                        resolve({ error: 'Runtime error', details: error.message });
+                    }
+                });
+
+                runProcess.on('close', (code) => {
+                    if (!processCompleted) {
+                        processCompleted = true;
+                        clearTimeout(timeoutId);
+                        cleanup();
+                        
+                        if (code === 124) {
+                            resolve({ error: 'TLE: Time Limit Exceeded' });
+                        } else if (code !== 0) {
+                            resolve({ error: 'Runtime error', details: errorOutput });
+                        } else {
+                            resolve({ output });
+                        }
+                    }
+                });
+            });
         });
     });
 };
