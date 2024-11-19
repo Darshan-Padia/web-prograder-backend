@@ -3,8 +3,14 @@ const bodyParser = require('body-parser');
 const fs = require('fs');
 const path = require('path');
 const app = express();
-const port = 5000;
 const { exec, spawn } = require('child_process');
+const cors = require('cors');
+
+// Use dynamic port for Render
+const port = process.env.PORT || 5000;
+
+app.use(bodyParser.json());
+app.use(cors());
 
 app.use(bodyParser.json());
 const cors = require('cors');
@@ -14,16 +20,16 @@ app.use(cors());
 // Serve static files (questions)
 app.use('/questions', express.static(path.join(__dirname, 'questions')));
 
+
 // API endpoint to fetch a list of questions (example)
+// API endpoint to fetch a list of questions
 app.get('/api/questions', (req, res) => {
     const questionsDir = path.join(__dirname, 'questions');
-    console.log('Reading questions from:', questionsDir);
     fs.readdir(questionsDir, (err, files) => {
         if (err) {
             return res.status(500).json({ error: 'Failed to read questions directory' });
         }
 
-        // Get the list of questions (assuming they are JSON files)
         const questions = files
             .filter(file => file.endsWith('.json'))
             .map(file => {
@@ -40,41 +46,8 @@ app.get('/api/questions', (req, res) => {
     });
 });
 
-// Endpoint to validate test cases
-// app.post('/validate-code', (req, res) => {
-//     const { questionId, userOutput } = req.body;
-  
-//     if (!questionId || !userOutput) {
-//       return res.status(400).json({ error: 'Question ID and user output are required' });
-//     }
-  
-//     const testCasesPath = path.join(__dirname, 'test_cases', `Ques${questionId}`);
-//     if (!fs.existsSync(testCasesPath)) {
-//       return res.status(404).json({ error: 'Test cases not found for the question' });
-//     }
-  
-//     const testFiles = fs.readdirSync(testCasesPath);
-//     const inputFiles = testFiles.filter(file => file.endsWith('.in'));
-    
-//     let allPassed = true;
-//     let results = [];
-  
-//     inputFiles.forEach(inputFile => {
-//       const baseName = inputFile.replace('.in', '');
-//       const expectedOutputFile = `${baseName}.out`;
-  
-//       const inputContent = fs.readFileSync(path.join(testCasesPath, inputFile), 'utf-8');
-//       const expectedOutputContent = fs.readFileSync(path.join(testCasesPath, expectedOutputFile), 'utf-8').trim();
-//       const userOutputTrimmed = userOutput[baseName]?.trim();
-  
-//       const passed = userOutputTrimmed === expectedOutputContent;
-//       results.push({ testCase: baseName, passed });
-  
-//       if (!passed) allPassed = false;
-//     });
-  
-//     res.status(200).json({ allPassed, results });
-//   });
+
+
 
 const maxOutputLength = 500;  // Set the maximum output length to show (adjust as needed)
 const TLE_LIMIT = 1000; // 1 second timeout in milliseconds
@@ -230,23 +203,24 @@ app.get('/api/questions/:id', (req, res) => {
     });
 });
 // Endpoint to log cheaters
+// Other endpoints remain unchanged, but make sure temporary files and logs like `cheaters.txt` are handled correctly
 app.post('/log-cheater', (req, res) => {
     const { name } = req.body;
-  
+
     if (!name) {
-      return res.status(400).json({ error: 'Name is required' });
+        return res.status(400).json({ error: 'Name is required' });
     }
-  
+
     // Append the name to cheaters.txt
     const cheaterEntry = `Cheater: ${name} - ${new Date().toISOString()}\n`;
-    fs.appendFile('cheaters.txt', cheaterEntry, (err) => {
-      if (err) {
-        return res.status(500).json({ error: 'Failed to log cheater' });
-      }
-      res.status(200).json({ message: 'Cheater logged successfully' });
+    const cheatersFilePath = path.join(__dirname, 'cheaters.txt');  // Ensure file path for Render
+    fs.appendFile(cheatersFilePath, cheaterEntry, (err) => {
+        if (err) {
+            return res.status(500).json({ error: 'Failed to log cheater' });
+        }
+        res.status(200).json({ message: 'Cheater logged successfully' });
     });
-  });
-  
+});
 
 
 app.post('/run-cpp', (req, res) => {
