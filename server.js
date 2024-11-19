@@ -120,33 +120,8 @@ app.post('/validate-code', async (req, res) => {
 // Function to handle the timeout
 const runCppWithTimeout = (code, input) => {
     return new Promise((resolve, reject) => {
-        const timeout = 1500; // 1 second
-        let timedOut = false;
+        const timeout = 1000; // 1 second
 
-        const timeoutTimer = setTimeout(() => {
-            timedOut = true;
-            resolve({ error: 'TLE: Time Limit Exceeded' });
-        }, timeout);
-
-        runCpp(code, input).then((response) => {
-            if (!timedOut) {
-                clearTimeout(timeoutTimer);
-                resolve(response);
-            }
-        }).catch((error) => {
-            if (!timedOut) {
-                clearTimeout(timeoutTimer);
-                reject(error);
-            }
-        });
-    });
-};
-
-
-
-// Utility function to compile and run C++ code
-const runCpp = (code, input) => {
-    return new Promise((resolve) => {
         const filePath = path.join(__dirname, 'temp.cpp');
         const outputPath = path.join(__dirname, 'output');
 
@@ -165,10 +140,24 @@ const runCpp = (code, input) => {
                 let output = '';
                 let errorOutput = '';
 
+                let executionStarted = false;
+                let startTime;
+
+                const timeoutTimer = setTimeout(() => {
+                    if (executionStarted && Date.now() - startTime >= timeout) {
+                        runProcess.kill(); // Terminate the process if it exceeds the time limit
+                        resolve({ error: 'TLE: Time Limit Exceeded' });
+                    }
+                }, timeout);
+
                 runProcess.stdin.write(input);
                 runProcess.stdin.end();
 
                 runProcess.stdout.on('data', (data) => {
+                    if (!executionStarted) {
+                        executionStarted = true;
+                        startTime = Date.now(); // Start timer when execution starts
+                    }
                     output += data.toString();
                 });
 
@@ -177,6 +166,8 @@ const runCpp = (code, input) => {
                 });
 
                 runProcess.on('close', (code) => {
+                    clearTimeout(timeoutTimer); // Stop the timeout timer
+
                     fs.unlinkSync(filePath);
                     fs.unlinkSync(outputPath);
 
@@ -184,12 +175,23 @@ const runCpp = (code, input) => {
                         return resolve({ error: 'Runtime error', details: errorOutput });
                     }
 
-                    resolve({ output });
+                    const endTime = Date.now();
+                    if (endTime - startTime > timeout) {
+                        resolve({ error: 'TLE: Time Limit Exceeded' });
+                    } else {
+                        resolve({ output });
+                    }
+                });
+
+                runProcess.on('error', (err) => {
+                    clearTimeout(timeoutTimer);
+                    resolve({ error: 'Runtime error', details: err.message });
                 });
             });
         });
     });
 };
+
 // API endpoint to fetch question details
 app.get('/api/questions/:id', (req, res) => {
     const { id } = req.params;
@@ -274,7 +276,7 @@ app.post('/run-cpp', (req, res) => {
                     responseSent = true;
                     return res.status(500).json({ error: 'TLE: Time Limit Exceeded' });
                 }
-            }, 1500); // 1 second timeout
+            }, 1000); // 1 second timeout
 
             runProcess.on('close', (code) => {
                 clearTimeout(timeoutTimer);
